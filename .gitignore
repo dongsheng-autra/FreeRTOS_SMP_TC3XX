@@ -1,0 +1,11 @@
+
+# output
+*.launch
+build
+version.h
+
+# VSCode
+.vscode
+
+# Python
+*.pyc
