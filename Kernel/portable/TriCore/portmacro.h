@@ -17,6 +17,7 @@
 /* System Includes. */
 #include <stdint.h>
 
+#include "IfxCpu.h"
 #include "IfxCpu_reg.h"
 
 /*-----------------------------------------------------------
@@ -69,6 +70,12 @@ extern void vTaskExitCritical( void );
 extern __attribute__( ( __noreturn__ ) ) void vPortLoopForever( void );
 #define portENTER_CRITICAL()    vTaskEnterCritical()
 #define portEXIT_CRITICAL()     vTaskExitCritical()
+
+extern void vPortCoreEmitSyncEvent( void );
+#define portCORE_EMIT_SYNC()             vPortCoreEmitSyncEvent()
+
+extern BaseType_t vPortCoreWaitSyncEvent( void );
+#define portCORE_WAIT_SYNC()             vPortCoreWaitSyncEvent()
 
 extern void vPortYield( void );
 #define portYIELD()             vPortYield()
@@ -130,12 +137,13 @@ extern unsigned long uxPortSetInterruptMaskFromISR( void );
 #define portMEMORY_BARRIER()         __asm( "" ::: "memory" )
 
 /* Multi-core */
-#define configNUM_CORES                      2
+#define configNUM_CORES                      6
+#define configMAIN_CORE                      0
 #define configUSE_CORE_AFFINITY              1
 #define configRUN_MULTIPLE_PRIORITIES        1
 #define configUSE_TASK_PREEMPTION_DISABLE    0
 
-#define portGET_CORE_ID()             (__mfcr(CPU_CORE_ID) & 0x0f)
+#define portGET_CORE_ID()             IfxCpu_getCoreIndex()
 extern void vPortYieldCore(BaseType_t xCoreID);
 #define portYIELD_CORE(a)             vPortYieldCore(a)
 

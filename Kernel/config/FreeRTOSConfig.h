@@ -82,10 +82,10 @@
 #define INCLUDE_xQueueGetMutexHolder                    1
 
 #define configKERNEL_INTERRUPT_PRIORITY                 1
-#define configMAX_SYSCALL_INTERRUPT_PRIORITY            31
-#define configMAX_API_CALL_INTERRUPT_PRIORITY           31
+#define configMAX_SYSCALL_INTERRUPT_PRIORITY            127
+#define configMAX_API_CALL_INTERRUPT_PRIORITY           127
 
-#define configASSERT( x ) if( ( x ) == 0 )              { portDISABLE_INTERRUPTS(); __debug(); vPortLoopForever();}
+#define configASSERT( x ) if( ( x ) == 0 )              { console_printf("Kernel assert %s, %d.\n", __func__, __LINE__);portDISABLE_INTERRUPTS(); __debug(); vPortLoopForever();}
 
 #endif /* FREERTOS_CONFIG_H */
 

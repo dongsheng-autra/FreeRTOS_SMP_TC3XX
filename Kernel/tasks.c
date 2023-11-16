@@ -410,7 +410,7 @@ PRIVILEGED_DATA static volatile UBaseType_t uxSchedulerSuspended = ( UBaseType_t
 /*
  * Creates the idle tasks during scheduler start
  */
-static BaseType_t prvCreateIdleTasks( void );
+BaseType_t prvCreateIdleTasks( BaseType_t xCoreID );
 
 /*
  * Returns the yield pending count for the calling core.
@@ -1678,16 +1678,16 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB )
 
             if( pxNewTCB->xIsIdle != pdFALSE )
             {
-                BaseType_t xCoreID;
+                BaseType_t xCoreID = portGET_CORE_ID();
 
                 /* Check if a core is free. */
-                for( xCoreID = ( UBaseType_t ) 0; xCoreID < ( UBaseType_t ) configNUM_CORES; xCoreID++ )
+                //for( xCoreID = ( UBaseType_t ) 0; xCoreID < ( UBaseType_t ) configNUM_CORES; xCoreID++ )
                 {
                     if( pxCurrentTCBs[ xCoreID ] == NULL )
                     {
                         pxNewTCB->xTaskRunState = xCoreID;
                         pxCurrentTCBs[ xCoreID ] = pxNewTCB;
-                        break;
+                        //break;
                     }
                 }
             }
@@ -2667,20 +2667,21 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB )
 #endif /* ( ( INCLUDE_xTaskResumeFromISR == 1 ) && ( INCLUDE_vTaskSuspend == 1 ) ) */
 /*-----------------------------------------------------------*/
 
-static BaseType_t prvCreateIdleTasks( void )
+BaseType_t prvCreateIdleTasks( BaseType_t xCoreID )
 {
     BaseType_t xReturn = pdPASS;
-    BaseType_t xCoreID;
+    //BaseType_t xCoreID;
     char cIdleName[ configMAX_TASK_NAME_LEN ];
 
     /* Add each idle task at the lowest priority. */
-    for( xCoreID = ( BaseType_t ) 0; xCoreID < ( BaseType_t ) configNUM_CORES; xCoreID++ )
+    //for( xCoreID = ( BaseType_t ) 0; xCoreID < ( BaseType_t ) configNUM_CORES; xCoreID++ )
     {
         BaseType_t x;
 
         if( xReturn == pdFAIL )
         {
-            break;
+            //break;
+            return xReturn;
         }
         else
         {
@@ -2735,13 +2736,14 @@ static BaseType_t prvCreateIdleTasks( void )
                     /* The Idle task is created using user provided RAM - obtain the
                      * address of the RAM then create the idle task. */
                     vApplicationGetIdleTaskMemory( &pxIdleTaskTCBBuffer, &pxIdleTaskStackBuffer, &ulIdleTaskStackSize );
-                    xIdleTaskHandle[ xCoreID ] = xTaskCreateStatic( prvIdleTask,
-                                                                    cIdleName,
-                                                                    ulIdleTaskStackSize,
-                                                                    ( void * ) NULL,       /*lint !e961.  The cast is not redundant for all compilers. */
-                                                                    portPRIVILEGE_BIT,     /* In effect ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), but tskIDLE_PRIORITY is zero. */
-                                                                    pxIdleTaskStackBuffer,
-                                                                    pxIdleTaskTCBBuffer ); /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
+                    xIdleTaskHandle[ xCoreID ] = xTaskCreateStaticAffinitySet( prvIdleTask,
+                                                                               cIdleName,
+                                                                               ulIdleTaskStackSize,
+                                                                               ( void * ) NULL,       /*lint !e961.  The cast is not redundant for all compilers. */
+                                                                               portPRIVILEGE_BIT,     /* In effect ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), but tskIDLE_PRIORITY is zero. */
+                                                                               pxIdleTaskStackBuffer,
+                                                                               pxIdleTaskTCBBuffer,   /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
+                                                                               1 << xCoreID );
                 }
 
                 #if ( configNUM_CORES > 1 )
@@ -2750,13 +2752,14 @@ static BaseType_t prvCreateIdleTasks( void )
                         static StaticTask_t xIdleTCBBuffers[ configNUM_CORES - 1 ];
                         static StackType_t xIdleTaskStackBuffers[ configNUM_CORES - 1 ][ configMINIMAL_STACK_SIZE ];
 
-                        xIdleTaskHandle[ xCoreID ] = xTaskCreateStatic( prvMinimalIdleTask,
-                                                                        cIdleName,
-                                                                        configMINIMAL_STACK_SIZE,
-                                                                        ( void * ) NULL,                   /*lint !e961.  The cast is not redundant for all compilers. */
-                                                                        portPRIVILEGE_BIT,                 /* In effect ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), but tskIDLE_PRIORITY is zero. */
-                                                                        xIdleTaskStackBuffers[ xCoreID - 1 ],
-                                                                        &xIdleTCBBuffers[ xCoreID - 1 ] ); /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
+                        xIdleTaskHandle[ xCoreID ] = xTaskCreateStaticAffinitySet( prvMinimalIdleTask,
+                                                                                   cIdleName,
+                                                                                   configMINIMAL_STACK_SIZE,
+                                                                                   ( void * ) NULL,                   /*lint !e961.  The cast is not redundant for all compilers. */
+                                                                                   portPRIVILEGE_BIT,                 /* In effect ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), but tskIDLE_PRIORITY is zero. */
+                                                                                   xIdleTaskStackBuffers[ xCoreID - 1 ],
+                                                                                   &xIdleTCBBuffers[ xCoreID - 1 ],   /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
+                                                                                   1 << xCoreID );
                     }
                 #endif /* if ( configNUM_CORES > 1 ) */
 
@@ -2800,20 +2803,23 @@ static BaseType_t prvCreateIdleTasks( void )
     return xReturn;
 }
 
-void vTaskStartScheduler( void )
+void vTaskStartScheduler( BaseType_t xCoreID )
 {
     BaseType_t xReturn;
 
     #if ( configUSE_TIMERS == 1 )
+        if ( xCoreID == configMAIN_CORE )
         {
             xReturn = xTimerCreateTimerTask();
         }
     #endif /* configUSE_TIMERS */
 
-    xReturn = prvCreateIdleTasks();
+    xReturn = prvCreateIdleTasks( xCoreID );
 
     if( xReturn == pdPASS )
     {
+        portCORE_EMIT_SYNC();
+
         /* freertos_tasks_c_additions_init() should only be called if the user
          * definable macro FREERTOS_TASKS_C_ADDITIONS_INIT() is defined, as that is
          * the only macro called by the function. */
@@ -2830,6 +2836,8 @@ void vTaskStartScheduler( void )
          * starts to run. */
         portDISABLE_INTERRUPTS();
 
+        portCORE_WAIT_SYNC();
+
         #if ( ( configUSE_NEWLIB_REENTRANT == 1 ) && ( configNEWLIB_REENTRANT_IS_DYNAMIC == 0 ) )
             {
                 /* Switch Newlib's _impure_ptr variable to point to the _reent
@@ -2843,9 +2851,19 @@ void vTaskStartScheduler( void )
             }
         #endif /* ( configUSE_NEWLIB_REENTRANT == 1 ) && ( configNEWLIB_REENTRANT_IS_DYNAMIC == 0 ) */
 
-        xNextTaskUnblockTime = portMAX_DELAY;
-        xSchedulerRunning = pdTRUE;
-        xTickCount = ( TickType_t ) configINITIAL_TICK_COUNT;
+        if ( xCoreID == configMAIN_CORE )
+        {
+            xNextTaskUnblockTime = portMAX_DELAY;
+            xSchedulerRunning = pdTRUE;
+            xTickCount = ( TickType_t ) configINITIAL_TICK_COUNT;
+        }
+        else
+        {
+            while ((xSchedulerRunning == pdFALSE) || (xTickCount <= configINITIAL_TICK_COUNT + 10))
+            {
+                mtCOVERAGE_TEST_MARKER();
+            }
+        }
 
         /* If configGENERATE_RUN_TIME_STATS is defined then the following
          * macro must be defined to configure the timer/counter used to generate
