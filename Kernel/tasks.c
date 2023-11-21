@@ -390,7 +390,7 @@ const volatile UBaseType_t uxTopUsedPriority = configMAX_PRIORITIES - 1U;
  * Updates to uxSchedulerSuspended must be protected by both the task and ISR locks and
  * must not be done by an ISR. Reads must be protected by either lock and may be done by
  * either an ISR or a task. */
-PRIVILEGED_DATA static volatile UBaseType_t uxSchedulerSuspended = ( UBaseType_t ) pdFALSE;
+PRIVILEGED_DATA static volatile UBaseType_t uxSchedulerSuspended[configNUM_CORES] = {( UBaseType_t ) pdFALSE};    /* TO DO by autra */
 
 #if ( configGENERATE_RUN_TIME_STATS == 1 )
 
@@ -410,7 +410,7 @@ PRIVILEGED_DATA static volatile UBaseType_t uxSchedulerSuspended = ( UBaseType_t
 /*
  * Creates the idle tasks during scheduler start
  */
-BaseType_t prvCreateIdleTasks( BaseType_t xCoreID );
+static BaseType_t prvCreateIdleTasks( BaseType_t xCoreID );    /* TO DO by autra */
 
 /*
  * Returns the yield pending count for the calling core.
@@ -616,6 +616,7 @@ static void prvCheckForRunStateChange( void )
     UBaseType_t uxPrevCriticalNesting;
     UBaseType_t uxPrevSchedulerSuspended;
     TCB_t * pxThisTCB;
+    BaseType_t xCoreID = portGET_CORE_ID();    /* TO DO by autra */
 
     /* This should be skipped when entering a critical section within
      * an ISR. If the task on the current core is no longer running, then
@@ -639,14 +640,14 @@ static void prvCheckForRunStateChange( void )
             * if our state changed again during the reacquisition. */
 
             uxPrevCriticalNesting = pxThisTCB->uxCriticalNesting;
-            uxPrevSchedulerSuspended = uxSchedulerSuspended;
+            uxPrevSchedulerSuspended = uxSchedulerSuspended[xCoreID];    /* TO DO by autra */
 
             /* this must only be called the first time we enter into a critical
              * section, otherwise it could context switch in the middle of a
              * critical section. */
             configASSERT( uxPrevCriticalNesting + uxPrevSchedulerSuspended == 1U );
 
-            uxSchedulerSuspended = 0U;
+            uxSchedulerSuspended[xCoreID] = 0U;    /* TO DO by autra */
 
             if( uxPrevCriticalNesting > 0U )
             {
@@ -674,7 +675,7 @@ static void prvCheckForRunStateChange( void )
             portGET_TASK_LOCK();
             portGET_ISR_LOCK();
             pxCurrentTCB->uxCriticalNesting = uxPrevCriticalNesting;
-            uxSchedulerSuspended = uxPrevSchedulerSuspended;
+            uxSchedulerSuspended[xCoreID] = uxPrevSchedulerSuspended;    /* TO DO by autra */
 
             if( uxPrevCriticalNesting == 0U )
             {
@@ -1678,16 +1679,16 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB )
 
             if( pxNewTCB->xIsIdle != pdFALSE )
             {
-                BaseType_t xCoreID = portGET_CORE_ID();
+                BaseType_t xCoreID = portGET_CORE_ID();    /* TO DO by autra */
 
                 /* Check if a core is free. */
-                //for( xCoreID = ( UBaseType_t ) 0; xCoreID < ( UBaseType_t ) configNUM_CORES; xCoreID++ )
+                //for( xCoreID = ( UBaseType_t ) 0; xCoreID < ( UBaseType_t ) configNUM_CORES; xCoreID++ )    /* TO DO by autra */
                 {
                     if( pxCurrentTCBs[ xCoreID ] == NULL )
                     {
                         pxNewTCB->xTaskRunState = xCoreID;
                         pxCurrentTCBs[ xCoreID ] = pxNewTCB;
-                        //break;
+                        //break;    /* TO DO by autra */
                     }
                 }
             }
@@ -1818,7 +1819,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB )
 
                 if( xTaskRunningOnCore == xCoreID )
                 {
-                    configASSERT( uxSchedulerSuspended == 0 );
+                    configASSERT( uxSchedulerSuspended[portGET_CORE_ID()] == 0 );    /* TO DO by autra */
                     vTaskYieldWithinAPI();
                 }
                 else
@@ -1846,7 +1847,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB )
 
         vTaskSuspendAll();
         {
-            configASSERT( uxSchedulerSuspended == 1 );
+            configASSERT( uxSchedulerSuspended[portGET_CORE_ID()] == 1 );    /* TO DO by autra */
 
             /* Minor optimisation.  The tick count cannot change in this
              * block. */
@@ -1932,7 +1933,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB )
         {
             vTaskSuspendAll();
             {
-                configASSERT( uxSchedulerSuspended == 1 );
+                configASSERT( uxSchedulerSuspended[portGET_CORE_ID()] == 1 );    /* TO DO by autra */
                 traceTASK_DELAY();
 
                 /* A task that is removed from the event list while the
@@ -2469,7 +2470,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB )
                     if( xTaskRunningOnCore == portGET_CORE_ID() )
                     {
                         /* The current task has just been suspended. */
-                        configASSERT( uxSchedulerSuspended == 0 );
+                        configASSERT( uxSchedulerSuspended[portGET_CORE_ID()] == 0 );    /* TO DO by autra */
                         vTaskYieldWithinAPI();
                     }
                     else
@@ -2629,7 +2630,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB )
                 traceTASK_RESUME_FROM_ISR( pxTCB );
 
                 /* Check the ready lists can be accessed. */
-                if( uxSchedulerSuspended == ( UBaseType_t ) pdFALSE )
+                if( uxSchedulerSuspended[portGET_CORE_ID()] == ( UBaseType_t ) pdFALSE )    /* TO DO by autra */
                 {
                     /* Ready lists can be accessed so move the task from the
                      * suspended list to the ready list directly. */
@@ -2667,21 +2668,21 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB )
 #endif /* ( ( INCLUDE_xTaskResumeFromISR == 1 ) && ( INCLUDE_vTaskSuspend == 1 ) ) */
 /*-----------------------------------------------------------*/
 
-BaseType_t prvCreateIdleTasks( BaseType_t xCoreID )
+static BaseType_t prvCreateIdleTasks( BaseType_t xCoreID )    /* TO DO by autra */
 {
     BaseType_t xReturn = pdPASS;
-    //BaseType_t xCoreID;
+    //BaseType_t xCoreID;    /* TO DO by autra */
     char cIdleName[ configMAX_TASK_NAME_LEN ];
 
     /* Add each idle task at the lowest priority. */
-    //for( xCoreID = ( BaseType_t ) 0; xCoreID < ( BaseType_t ) configNUM_CORES; xCoreID++ )
+    //for( xCoreID = ( BaseType_t ) 0; xCoreID < ( BaseType_t ) configNUM_CORES; xCoreID++ )    /* TO DO by autra */
     {
         BaseType_t x;
 
         if( xReturn == pdFAIL )
         {
-            //break;
-            return xReturn;
+            //break;           /* TO DO by autra */
+            return xReturn;    /* TO DO by autra */
         }
         else
         {
@@ -2736,14 +2737,14 @@ BaseType_t prvCreateIdleTasks( BaseType_t xCoreID )
                     /* The Idle task is created using user provided RAM - obtain the
                      * address of the RAM then create the idle task. */
                     vApplicationGetIdleTaskMemory( &pxIdleTaskTCBBuffer, &pxIdleTaskStackBuffer, &ulIdleTaskStackSize );
-                    xIdleTaskHandle[ xCoreID ] = xTaskCreateStaticAffinitySet( prvIdleTask,
+                    xIdleTaskHandle[ xCoreID ] = xTaskCreateStaticAffinitySet( prvIdleTask,           /* TO DO by autra */
                                                                                cIdleName,
                                                                                ulIdleTaskStackSize,
                                                                                ( void * ) NULL,       /*lint !e961.  The cast is not redundant for all compilers. */
                                                                                portPRIVILEGE_BIT,     /* In effect ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), but tskIDLE_PRIORITY is zero. */
                                                                                pxIdleTaskStackBuffer,
                                                                                pxIdleTaskTCBBuffer,   /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
-                                                                               1 << xCoreID );
+                                                                               1 << xCoreID );        /* TO DO by autra */
                 }
 
                 #if ( configNUM_CORES > 1 )
@@ -2752,14 +2753,14 @@ BaseType_t prvCreateIdleTasks( BaseType_t xCoreID )
                         static StaticTask_t xIdleTCBBuffers[ configNUM_CORES - 1 ];
                         static StackType_t xIdleTaskStackBuffers[ configNUM_CORES - 1 ][ configMINIMAL_STACK_SIZE ];
 
-                        xIdleTaskHandle[ xCoreID ] = xTaskCreateStaticAffinitySet( prvMinimalIdleTask,
+                        xIdleTaskHandle[ xCoreID ] = xTaskCreateStaticAffinitySet( prvMinimalIdleTask,                /* TO DO by autra */
                                                                                    cIdleName,
                                                                                    configMINIMAL_STACK_SIZE,
                                                                                    ( void * ) NULL,                   /*lint !e961.  The cast is not redundant for all compilers. */
                                                                                    portPRIVILEGE_BIT,                 /* In effect ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), but tskIDLE_PRIORITY is zero. */
                                                                                    xIdleTaskStackBuffers[ xCoreID - 1 ],
                                                                                    &xIdleTCBBuffers[ xCoreID - 1 ],   /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
-                                                                                   1 << xCoreID );
+                                                                                   1 << xCoreID );                    /* TO DO by autra */
                     }
                 #endif /* if ( configNUM_CORES > 1 ) */
 
@@ -2803,22 +2804,22 @@ BaseType_t prvCreateIdleTasks( BaseType_t xCoreID )
     return xReturn;
 }
 
-void vTaskStartScheduler( BaseType_t xCoreID )
+void vTaskStartScheduler( BaseType_t xCoreID )    /* TO DO by autra */
 {
     BaseType_t xReturn;
 
     #if ( configUSE_TIMERS == 1 )
-        if ( xCoreID == configMAIN_CORE )
+        if ( xCoreID == configMAIN_CORE )         /* TO DO by autra */
         {
             xReturn = xTimerCreateTimerTask();
         }
     #endif /* configUSE_TIMERS */
 
-    xReturn = prvCreateIdleTasks( xCoreID );
+    xReturn = prvCreateIdleTasks( xCoreID );      /* TO DO by autra */
 
     if( xReturn == pdPASS )
     {
-        portCORE_EMIT_SYNC();
+        portCORE_EMIT_SYNC();                     /* TO DO by autra */
 
         /* freertos_tasks_c_additions_init() should only be called if the user
          * definable macro FREERTOS_TASKS_C_ADDITIONS_INIT() is defined, as that is
@@ -2836,7 +2837,7 @@ void vTaskStartScheduler( BaseType_t xCoreID )
          * starts to run. */
         portDISABLE_INTERRUPTS();
 
-        portCORE_WAIT_SYNC();
+        portCORE_WAIT_SYNC();                     /* TO DO by autra */
 
         #if ( ( configUSE_NEWLIB_REENTRANT == 1 ) && ( configNEWLIB_REENTRANT_IS_DYNAMIC == 0 ) )
             {
@@ -2851,13 +2852,13 @@ void vTaskStartScheduler( BaseType_t xCoreID )
             }
         #endif /* ( configUSE_NEWLIB_REENTRANT == 1 ) && ( configNEWLIB_REENTRANT_IS_DYNAMIC == 0 ) */
 
-        if ( xCoreID == configMAIN_CORE )
+        if ( xCoreID == configMAIN_CORE )              /* TO DO by autra */
         {
             xNextTaskUnblockTime = portMAX_DELAY;
             xSchedulerRunning = pdTRUE;
             xTickCount = ( TickType_t ) configINITIAL_TICK_COUNT;
         }
-        else
+        else                                           /* TO DO by autra */
         {
             while ((xSchedulerRunning == pdFALSE) || (xTickCount <= configINITIAL_TICK_COUNT + 10))
             {
@@ -2919,6 +2920,7 @@ void vTaskEndScheduler( void )
 void vTaskSuspendAll( void )
 {
     UBaseType_t ulState;
+    BaseType_t xCoreID = portGET_CORE_ID();    /* TO DO by autra */
 
     /* This must only be called from within a task */
     portASSERT_IF_IN_ISR();
@@ -2941,10 +2943,10 @@ void vTaskSuspendAll( void )
 
         /* The scheduler is suspended if uxSchedulerSuspended is non-zero.  An increment
          * is used to allow calls to vTaskSuspendAll() to nest. */
-        ++uxSchedulerSuspended;
+        ++uxSchedulerSuspended[xCoreID];    /* TO DO by autra */
         portRELEASE_ISR_LOCK();
 
-        if( ( uxSchedulerSuspended == 1U ) && ( pxCurrentTCB->uxCriticalNesting == 0U ) )
+        if( ( uxSchedulerSuspended[xCoreID] == 1U ) && ( pxCurrentTCB->uxCriticalNesting == 0U ) )    /* TO DO by autra */
         {
             prvCheckForRunStateChange();
         }
@@ -3025,6 +3027,7 @@ BaseType_t xTaskResumeAll( void )
 {
     TCB_t * pxTCB = NULL;
     BaseType_t xAlreadyYielded = pdFALSE;
+    BaseType_t xCoreID = portGET_CORE_ID();    /* TO DO by autra */
 
     if( xSchedulerRunning != pdFALSE )
     {
@@ -3041,12 +3044,12 @@ BaseType_t xTaskResumeAll( void )
 
             /* If uxSchedulerSuspended is zero then this function does not match a
              * previous call to vTaskSuspendAll(). */
-            configASSERT( uxSchedulerSuspended );
+            configASSERT( uxSchedulerSuspended[xCoreID] );    /* TO DO by autra */
 
-            --uxSchedulerSuspended;
+            --uxSchedulerSuspended[xCoreID];    /* TO DO by autra */
             portRELEASE_TASK_LOCK();
 
-            if( uxSchedulerSuspended == ( UBaseType_t ) pdFALSE )
+            if( uxSchedulerSuspended[xCoreID] == ( UBaseType_t ) pdFALSE )    /* TO DO by autra */
             {
                 if( uxCurrentNumberOfTasks > ( UBaseType_t ) 0U )
                 {
@@ -3450,7 +3453,7 @@ BaseType_t xTaskCatchUpTicks( TickType_t xTicksToCatchUp )
 
     /* Must not be called with the scheduler suspended as the implementation
      * relies on xPendedTicks being wound down to 0 in xTaskResumeAll(). */
-    configASSERT( uxSchedulerSuspended == 0 );
+    configASSERT( uxSchedulerSuspended[portGET_CORE_ID()] == 0 );    /* TO DO by autra */
 
     /* Use xPendedTicks to mimic xTicksToCatchUp number of ticks occurring when
      * the scheduler is suspended so the ticks are executed in xTaskResumeAll(). */
@@ -3539,6 +3542,7 @@ BaseType_t xTaskIncrementTick( void )
     TCB_t * pxTCB;
     TickType_t xItemValue;
     BaseType_t xSwitchRequired = pdFALSE;
+    BaseType_t xCoreID = portGET_CORE_ID();    /* TO DO by autra */
 
     #if ( configUSE_PREEMPTION == 1 )
         UBaseType_t x;
@@ -3556,7 +3560,7 @@ BaseType_t xTaskIncrementTick( void )
          * responsibility to increment the tick, or increment the pended ticks if the
          * scheduler is suspended.  If pended ticks is greater than zero, the core that
          * calls xTaskResumeAll has the responsibility to increment the tick. */
-        if( uxSchedulerSuspended == ( UBaseType_t ) pdFALSE )
+        if( uxSchedulerSuspended[xCoreID] == ( UBaseType_t ) pdFALSE )    /* TO DO by autra */
         {
             /* Minor optimisation.  The tick count cannot change in this
              * block. */
@@ -3881,7 +3885,7 @@ void vTaskSwitchContext( BaseType_t xCoreID )
          * This is not necessarily true for vanilla FreeRTOS, but it is for this SMP port. */
         configASSERT( pxCurrentTCB->uxCriticalNesting == 0 );
 
-        if( uxSchedulerSuspended != ( UBaseType_t ) pdFALSE )
+        if( uxSchedulerSuspended[xCoreID] != ( UBaseType_t ) pdFALSE )    /* TO DO by autra */
         {
             /* The scheduler is currently suspended - do not allow a context
              * switch. */
@@ -3987,7 +3991,7 @@ void vTaskPlaceOnUnorderedEventList( List_t * pxEventList,
 
     /* THIS FUNCTION MUST BE CALLED WITH THE SCHEDULER SUSPENDED.  It is used by
      * the event groups implementation. */
-    configASSERT( uxSchedulerSuspended != 0 );
+    configASSERT( uxSchedulerSuspended[portGET_CORE_ID()] != 0 );    /* TO DO by autra */
 
     /* Store the item value in the event list item.  It is safe to access the
      * event list item here as interrupts won't access the event list item of a
@@ -4062,7 +4066,7 @@ BaseType_t xTaskRemoveFromEventList( const List_t * const pxEventList )
     configASSERT( pxUnblockedTCB );
     ( void ) uxListRemove( &( pxUnblockedTCB->xEventListItem ) );
 
-    if( uxSchedulerSuspended == ( UBaseType_t ) pdFALSE )
+    if( uxSchedulerSuspended == ( UBaseType_t ) pdFALSE )    /* TO DO by autra */
     {
         ( void ) uxListRemove( &( pxUnblockedTCB->xStateListItem ) );
         prvAddTaskToReadyList( pxUnblockedTCB );
@@ -4109,7 +4113,7 @@ void vTaskRemoveFromUnorderedEventList( ListItem_t * pxEventListItem,
 
     /* THIS FUNCTION MUST BE CALLED WITH THE SCHEDULER SUSPENDED.  It is used by
      * the event flags implementation. */
-    configASSERT( uxSchedulerSuspended != pdFALSE );
+    configASSERT( uxSchedulerSuspended[portGET_CORE_ID()] != pdFALSE );    /* TO DO by autra */
 
     /* Store the new item value in the event list. */
     listSET_LIST_ITEM_VALUE( pxEventListItem, xItemValue | taskEVENT_LIST_ITEM_VALUE_IN_USE );
@@ -5023,6 +5027,7 @@ static void prvResetNextTaskUnblockTime( void )
     BaseType_t xTaskGetSchedulerState( void )
     {
         BaseType_t xReturn;
+        BaseType_t xCoreID = portGET_CORE_ID();    /* TO DO by autra */
 
         if( xSchedulerRunning == pdFALSE )
         {
@@ -5032,7 +5037,7 @@ static void prvResetNextTaskUnblockTime( void )
         {
             taskENTER_CRITICAL();
             {
-                if( uxSchedulerSuspended == ( UBaseType_t ) pdFALSE )
+                if( uxSchedulerSuspended[xCoreID] == ( UBaseType_t ) pdFALSE )    /* TO DO by autra */
                 {
                     xReturn = taskSCHEDULER_RUNNING;
                 }
@@ -5369,7 +5374,7 @@ void vTaskYieldWithinAPI( void )
              * vTaskExitCritical() is called after pxCurrentTCB changes. Therefore
              * this should not be used within vTaskSwitchContext(). */
 
-            if( ( uxSchedulerSuspended == 0U ) && ( pxCurrentTCB->uxCriticalNesting == 1U ) )
+            if( ( uxSchedulerSuspended[portGET_CORE_ID()] == 0U ) && ( pxCurrentTCB->uxCriticalNesting == 1U ) )    /* TO DO by autra */
             {
                 prvCheckForRunStateChange();
             }
@@ -6022,6 +6027,7 @@ TickType_t uxTaskResetEventItemValue( void )
         uint8_t ucOriginalNotifyState;
         BaseType_t xReturn = pdPASS;
         UBaseType_t uxSavedInterruptStatus;
+        BaseType_t xCoreID = portGET_CORE_ID();    /* TO DO by autra */
 
         configASSERT( xTaskToNotify );
         configASSERT( uxIndexToNotify < configTASK_NOTIFICATION_ARRAY_ENTRIES );
@@ -6108,7 +6114,7 @@ TickType_t uxTaskResetEventItemValue( void )
                 /* The task should not have been on an event list. */
                 configASSERT( listLIST_ITEM_CONTAINER( &( pxTCB->xEventListItem ) ) == NULL );
 
-                if( uxSchedulerSuspended == ( UBaseType_t ) pdFALSE )
+                if( uxSchedulerSuspended[xCoreID] == ( UBaseType_t ) pdFALSE )    /* TO DO by autra */
                 {
                     ( void ) uxListRemove( &( pxTCB->xStateListItem ) );
                     prvAddTaskToReadyList( pxTCB );
@@ -6150,6 +6156,7 @@ TickType_t uxTaskResetEventItemValue( void )
         TCB_t * pxTCB;
         uint8_t ucOriginalNotifyState;
         UBaseType_t uxSavedInterruptStatus;
+        BaseType_t xCoreID = portGET_CORE_ID();    /* TO DO by autra */
 
         configASSERT( xTaskToNotify );
         configASSERT( uxIndexToNotify < configTASK_NOTIFICATION_ARRAY_ENTRIES );
@@ -6192,7 +6199,7 @@ TickType_t uxTaskResetEventItemValue( void )
                 /* The task should not have been on an event list. */
                 configASSERT( listLIST_ITEM_CONTAINER( &( pxTCB->xEventListItem ) ) == NULL );
 
-                if( uxSchedulerSuspended == ( UBaseType_t ) pdFALSE )
+                if( uxSchedulerSuspended[xCoreID] == ( UBaseType_t ) pdFALSE )    /* TO DO by autra */
                 {
                     ( void ) uxListRemove( &( pxTCB->xStateListItem ) );
                     prvAddTaskToReadyList( pxTCB );

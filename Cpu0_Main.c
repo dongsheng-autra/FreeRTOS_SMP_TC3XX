@@ -32,6 +32,7 @@
 #include "task.h"
 
 #include "UART_VCOM.h"
+#include "test.h"
 
 static void task_uart(void *arg)
 {
@@ -48,8 +49,10 @@ static void task_uart(void *arg)
 static void task_cpu0_beat(void *arg)
 {
     int* cpuid = arg;
-    int count = 0;
+    int  count = 0;
+    int  result;
     uint8_t core_idx = IfxCpu_getCoreIndex();
+    uint8_t crc_cal;
 
     while (1)
     {
@@ -57,9 +60,20 @@ static void task_cpu0_beat(void *arg)
         {
             console_printf("CPU %d beat task run in Core %d.\n", *cpuid, core_idx);
         }
+
+        xSemaphoreTake(g_mutex, portMAX_DELAY);
+
+        result = test_semaphore(&g_semtest, &crc_cal);
+
+        xSemaphoreGive(g_mutex);
+
+        if (result != 0)
+        {
+            console_printf("CPU %d semaphore test fail.\n", *cpuid);
+        }
         else
         {
-            console_printf("CPU %d, run %d s\n", *cpuid, count);
+            console_printf("CPU %d, run %d s.\n", *cpuid, count);
         }
 
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -79,8 +93,12 @@ void core0_main(void)
 
     int cpuid = IfxCpu_getCoreIndex();
 
-    xTaskCreateAffinitySet(task_uart, "task_uart", 256, NULL, 5, 0x01, NULL);
-    xTaskCreateAffinitySet(task_cpu0_beat, "task_cpu0_beat", 256, (void * const)&cpuid, 5, 0x01, NULL);
+    xTaskCreateAffinitySet(task_uart, "task_uart", 512, NULL, 5, 0x01, NULL);
+    xTaskCreateAffinitySet(task_cpu0_beat, "task_cpu0_beat", 512, (void * const)&cpuid, 5, 0x01, NULL);
+
+    g_mutex = xSemaphoreCreateMutex();
+
+    test_init(&g_semtest);
 
     /* Start the tasks running. */
     vTaskStartScheduler(cpuid);
