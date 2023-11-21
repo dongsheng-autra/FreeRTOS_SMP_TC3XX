@@ -13,7 +13,7 @@
 #include <stdbool.h>
 
 /* malloc is limited, so define max packet queue size */
-#define MAX_PKT_QUEUE_SIZE      32
+#define MAX_PKT_QUEUE_SIZE      128
 
 struct pkt_queue {
     void *buf[MAX_PKT_QUEUE_SIZE];

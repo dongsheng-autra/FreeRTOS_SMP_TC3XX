@@ -32,23 +32,51 @@
 #include "task.h"
 
 #include "UART_VCOM.h"
+#include "test.h"
 
-IFX_ALIGN(4) IfxCpu_syncEvent g_cpuSyncEvent = 0;
-
-int g_sync = 0;
-extern int g_c_sync;
-
-extern volatile unsigned port_xSchedulerRunning[];
-static void task_comm(void *arg)
+static void task_uart(void *arg)
 {
     (void)arg;
-    int count = 0;
+
+    init_UART();
 
     while (1)
     {
-        console_printf("task_comm CPU %d, run %d s\n", IfxCpu_getCoreIndex(), count);
+        console_process();
+    }
+}
+
+static void task_cpu0_beat(void *arg)
+{
+    int* cpuid = arg;
+    int  count = 0;
+    int  result;
+    uint8_t core_idx = IfxCpu_getCoreIndex();
+    uint8_t crc_cal;
+
+    while (1)
+    {
+        if (core_idx != *cpuid)
+        {
+            console_printf("CPU %d beat task run in Core %d.\n", *cpuid, core_idx);
+        }
+
+        xSemaphoreTake(g_mutex, portMAX_DELAY);
+
+        result = test_semaphore(&g_semtest, &crc_cal);
+
+        xSemaphoreGive(g_mutex);
+
+        if (result != 0)
+        {
+            console_printf("CPU %d semaphore test fail.\n", *cpuid);
+        }
+        else
+        {
+            console_printf("CPU %d, run %d s.\n", *cpuid, count);
+        }
+
         vTaskDelay(pdMS_TO_TICKS(1000));
-        port_xSchedulerRunning[0] = 1;
         count++;
     }
 }
@@ -62,23 +90,18 @@ void core0_main(void)
      */
     IfxScuWdt_disableCpuWatchdog(IfxScuWdt_getCpuWatchdogPassword());
     IfxScuWdt_disableSafetyWatchdog(IfxScuWdt_getSafetyWatchdogPassword());
-    
-    /* Wait for CPU sync event */
-    IfxCpu_emitEvent(&g_cpuSyncEvent);
-    IfxCpu_waitEvent(&g_cpuSyncEvent, 1);
 
-    while(g_c_sync == 0) {
-        ;
-    }
+    int cpuid = IfxCpu_getCoreIndex();
 
-    xTaskCreate(task_comm, "task_comm", 1024, NULL, 5, NULL);
-    xTaskCreateAffinitySet(task_comm, "task_comma", 1024, NULL, 5, 0x01, NULL);
+    xTaskCreateAffinitySet(task_uart, "task_uart", 512, NULL, 5, 0x01, NULL);
+    xTaskCreateAffinitySet(task_cpu0_beat, "task_cpu0_beat", 512, (void * const)&cpuid, 5, 0x01, NULL);
 
-    while(g_sync == 0) {
-        ;
-    }
+    g_mutex = xSemaphoreCreateMutex();
+
+    test_init(&g_semtest);
+
     /* Start the tasks running. */
-    vTaskStartScheduler();
+    vTaskStartScheduler(cpuid);
 
     while(1)
     {

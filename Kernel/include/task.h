@@ -1461,7 +1461,7 @@ void vTaskPreemptionEnable( const TaskHandle_t xTask );
  * \defgroup vTaskStartScheduler vTaskStartScheduler
  * \ingroup SchedulerControl
  */
-void vTaskStartScheduler( void ) PRIVILEGED_FUNCTION;
+void vTaskStartScheduler( BaseType_t xCoreID ) PRIVILEGED_FUNCTION;    /* TO DO by autra */
 
 /**
  * task. h

@@ -28,7 +28,46 @@
 #include "IfxCpu.h"
 #include "IfxScuWdt.h"
 
-extern IfxCpu_syncEvent g_cpuSyncEvent;
+#include "FreeRTOS.h"
+#include "task.h"
+
+#include "UART_VCOM.h"
+#include "test.h"
+
+static void task_cpu3_beat(void *arg)
+{
+    int* cpuid = arg;
+    int  count = 0;
+    int  result;
+    uint8_t core_idx = IfxCpu_getCoreIndex();
+    uint8_t crc_cal;
+
+    while (1)
+    {
+        if (core_idx != *cpuid)
+        {
+            console_printf("CPU %d beat task run in Core %d.\n", *cpuid, core_idx);
+        }
+
+        xSemaphoreTake(g_mutex, portMAX_DELAY);
+
+        result = test_semaphore(&g_semtest, &crc_cal);
+
+        xSemaphoreGive(g_mutex);
+
+        if (result != 0)
+        {
+            console_printf("CPU %d semaphore test fail.\n", *cpuid);
+        }
+        else
+        {
+            console_printf("CPU %d, run %d s.\n", *cpuid, count);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        count++;
+    }
+}
 
 void core3_main(void)
 {
@@ -38,11 +77,14 @@ void core3_main(void)
      * Enable the watchdog and service it periodically if it is required
      */
     IfxScuWdt_disableCpuWatchdog(IfxScuWdt_getCpuWatchdogPassword());
-    
-    /* Wait for CPU sync event */
-    IfxCpu_emitEvent(&g_cpuSyncEvent);
-    IfxCpu_waitEvent(&g_cpuSyncEvent, 1);
-    
+
+    int cpuid = IfxCpu_getCoreIndex();
+
+    xTaskCreateAffinitySet(task_cpu3_beat, "task_cpu3_beat", 512, (void * const)&cpuid, 5, 0x08, NULL);
+
+    /* Start the tasks running. */
+    vTaskStartScheduler(cpuid);
+
     while(1)
     {
     }

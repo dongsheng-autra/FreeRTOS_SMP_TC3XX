@@ -9,6 +9,7 @@
 
 /* Std includes */
 #include <string.h>
+#include <stdbool.h>
 
 /* Kernel includes. */
 #include "FreeRTOS.h"
@@ -41,10 +42,11 @@
 /* This reference is required by the save/restore context macros. */
 extern volatile unsigned long *pxCurrentTCBs[];
 
+static IfxCpu_syncEvent g_coreSyncEvent = 0;
 static IfxStm_Timer g_timer[configNUM_CORES];
-static Ifx_STM *g_system_timer[configNUM_CORES] = {&MODULE_STM0, &MODULE_STM1};
-volatile Ifx_SRC_SRCR *g_GPSR[configNUM_CORES] = {&SRC_GPSR00, &SRC_GPSR10};
-volatile unsigned port_xSchedulerRunning[configNUM_CORES] = {0};
+static Ifx_STM *g_system_timer[configNUM_CORES] = {&MODULE_STM0, &MODULE_STM1, &MODULE_STM2, &MODULE_STM3, &MODULE_STM4, &MODULE_STM5};
+volatile Ifx_SRC_SRCR *g_GPSR[configNUM_CORES] = {&SRC_GPSR00, &SRC_GPSR10, &SRC_GPSR20, &SRC_GPSR30, &SRC_GPSR40, &SRC_GPSR50};
+volatile unsigned port_xSchedulerRunning[configNUM_CORES] = {pdFALSE};
 
 #define configSTM_CLOCK_HZ		(configCPU_CLOCK_HZ/3)
 
@@ -55,7 +57,6 @@ static void vPortInitTickTimer()
 {
 	IfxStm_Timer_Config timerConfig;
     int cpu_id = portGET_CORE_ID();
-    console_printf("Current CPU is %d\n", cpu_id);
 
 	IfxStm_Timer_initConfig(&timerConfig, g_system_timer[cpu_id]);
 	timerConfig.base.isrPriority = configSYSTEM_INTERRUPT_PRIORITY + cpu_id;
@@ -73,10 +74,30 @@ static void vPortInitContextSrc()
     IfxSrc_enable( g_GPSR[cpu_id] );
 }
 
+void vPortCoreEmitSyncEvent()
+{
+    IfxCpu_emitEvent(&g_coreSyncEvent);
+}
+
+BaseType_t vPortCoreWaitSyncEvent()
+{
+    BaseType_t xReture = pdFALSE;
+    bool err;
+
+    err = IfxCpu_waitEvent(&g_coreSyncEvent, 10);
+
+    if (err == 0)
+    {
+        xReture = pdTRUE;
+    }
+
+    return xReture;
+}
+
 void vPortYield()
 {
     int cpu_id = portGET_CORE_ID();
-    console_printf("Yield CPU is %d\n", cpu_id);
+
     if( IfxSrc_isRequested( g_GPSR[cpu_id] ) != TRUE )
     {
         IfxSrc_setRequest( g_GPSR[cpu_id] );
@@ -90,7 +111,6 @@ void vPortYieldCore(BaseType_t xCoreID)
 {
     int cpu_id = portGET_CORE_ID();
     if (cpu_id == 1) {
-        console_printf("Yield Core CPU is %d\n", cpu_id);
     }
 }
 
@@ -103,7 +123,6 @@ static void vPortStartFirstTask()
     unsigned long uxLowerCSA;
 
     int cpu_id = portGET_CORE_ID();
-    console_printf("vPortStartFirstTask CPU is %d, 0x%x\n", cpu_id, pxCurrentTCBs[cpu_id]);
 
     __disable();
 
@@ -132,6 +151,8 @@ static void vPortStartFirstTask()
 	__nop();
 	__rslcx();
 	__nop();
+
+    port_xSchedulerRunning[cpu_id] = pdTRUE;
 
 	/* Return to the first task selected to execute. */
 	__asm volatile("rfe");
@@ -209,7 +230,7 @@ void vPortEndScheduler()
 {
 }
 
-IFX_INTERRUPT( vPortSystemContextHandler, 0, configKERNEL_INTERRUPT_PRIORITY )
+IFX_INTERRUPT( vPortSystemContextHandlerCore0, 0, configKERNEL_INTERRUPT_PRIORITY )
 {
     unsigned long ** ppxTopOfStack;
     unsigned long uxLowerCSA;
@@ -242,13 +263,11 @@ IFX_INTERRUPT( vPortSystemContextHandler, 0, configKERNEL_INTERRUPT_PRIORITY )
     __enable();
 }
 
-IFX_INTERRUPT( vPortSystemContextHandlerCore, 1, configKERNEL_INTERRUPT_PRIORITY + 1 )
+IFX_INTERRUPT( vPortSystemContextHandlerCore1, 1, configKERNEL_INTERRUPT_PRIORITY + 1 )
 {
     unsigned long ** ppxTopOfStack;
     unsigned long uxLowerCSA;
     unsigned long * pxLowerCSA, * pxUpperCSA;
-
-    console_printf("vPortSystemContextHandlerCore: 0x%x\n", pxCurrentTCBs[1]);
 
     __disable();
     {
@@ -277,10 +296,148 @@ IFX_INTERRUPT( vPortSystemContextHandlerCore, 1, configKERNEL_INTERRUPT_PRIORITY
     __enable();
 }
 
-IFX_INTERRUPT( vPortSystemTickHandler, 0, configSYSTEM_INTERRUPT_PRIORITY )
+IFX_INTERRUPT( vPortSystemContextHandlerCore2, 2, configKERNEL_INTERRUPT_PRIORITY + 2 )
+{
+    unsigned long ** ppxTopOfStack;
+    unsigned long uxLowerCSA;
+    unsigned long * pxLowerCSA, * pxUpperCSA;
+
+    __disable();
+    {
+        __dsync();
+        /* Load the current top of stack pointer and csa info */
+        ppxTopOfStack = ( unsigned long ** ) pxCurrentTCBs[2];
+        uxLowerCSA = __mfcr( CPU_PCXI );
+        pxLowerCSA = portCSA_TO_ADDRESS( uxLowerCSA );
+        pxUpperCSA = portCSA_TO_ADDRESS( pxLowerCSA[ 0 ] );
+        /* Update the stack info in the TCB */
+        *ppxTopOfStack = ( unsigned long * ) pxUpperCSA[ 2 ];
+        /* Place the lower CSA id on the stack */
+        ( *ppxTopOfStack )--;
+        **ppxTopOfStack = uxLowerCSA;
+
+        vTaskSwitchContext(2);
+
+        /* Load the new CSA id from the new stack and update the stack pointer */
+        ppxTopOfStack = ( unsigned long ** ) pxCurrentTCBs[2];
+        uxLowerCSA = **ppxTopOfStack;
+        {
+            pxLowerCSA = portCSA_TO_ADDRESS( uxLowerCSA );
+            pxUpperCSA = portCSA_TO_ADDRESS( pxLowerCSA[ 0 ] );
+        }
+        ( *ppxTopOfStack )++;
+        /* Update the link register */
+        __mtcr( CPU_PCXI, uxLowerCSA );
+        __isync();
+    }
+    __enable();
+}
+
+IFX_INTERRUPT( vPortSystemContextHandlerCore3, 3, configKERNEL_INTERRUPT_PRIORITY + 3 )
+{
+    unsigned long ** ppxTopOfStack;
+    unsigned long uxLowerCSA;
+    unsigned long * pxLowerCSA, * pxUpperCSA;
+
+    __disable();
+    {
+        __dsync();
+        /* Load the current top of stack pointer and csa info */
+        ppxTopOfStack = ( unsigned long ** ) pxCurrentTCBs[3];
+        uxLowerCSA = __mfcr( CPU_PCXI );
+        pxLowerCSA = portCSA_TO_ADDRESS( uxLowerCSA );
+        pxUpperCSA = portCSA_TO_ADDRESS( pxLowerCSA[ 0 ] );
+        /* Update the stack info in the TCB */
+        *ppxTopOfStack = ( unsigned long * ) pxUpperCSA[ 2 ];
+        /* Place the lower CSA id on the stack */
+        ( *ppxTopOfStack )--;
+        **ppxTopOfStack = uxLowerCSA;
+
+        vTaskSwitchContext(3);
+
+        /* Load the new CSA id from the new stack and update the stack pointer */
+        ppxTopOfStack = ( unsigned long ** ) pxCurrentTCBs[3];
+        uxLowerCSA = **ppxTopOfStack;
+        ( *ppxTopOfStack )++;
+        /* Update the link register */
+        __mtcr( CPU_PCXI, uxLowerCSA );
+        __isync();
+    }
+    __enable();
+}
+
+IFX_INTERRUPT( vPortSystemContextHandlerCore4, 4, configKERNEL_INTERRUPT_PRIORITY + 4 )
+{
+    unsigned long ** ppxTopOfStack;
+    unsigned long uxLowerCSA;
+    unsigned long * pxLowerCSA, * pxUpperCSA;
+
+    __disable();
+    {
+        __dsync();
+        /* Load the current top of stack pointer and csa info */
+        ppxTopOfStack = ( unsigned long ** ) pxCurrentTCBs[4];
+        uxLowerCSA = __mfcr( CPU_PCXI );
+        pxLowerCSA = portCSA_TO_ADDRESS( uxLowerCSA );
+        pxUpperCSA = portCSA_TO_ADDRESS( pxLowerCSA[ 0 ] );
+        /* Update the stack info in the TCB */
+        *ppxTopOfStack = ( unsigned long * ) pxUpperCSA[ 2 ];
+        /* Place the lower CSA id on the stack */
+        ( *ppxTopOfStack )--;
+        **ppxTopOfStack = uxLowerCSA;
+
+        vTaskSwitchContext(4);
+
+        /* Load the new CSA id from the new stack and update the stack pointer */
+        ppxTopOfStack = ( unsigned long ** ) pxCurrentTCBs[4];
+        uxLowerCSA = **ppxTopOfStack;
+        ( *ppxTopOfStack )++;
+        /* Update the link register */
+        __mtcr( CPU_PCXI, uxLowerCSA );
+        __isync();
+    }
+    __enable();
+}
+
+IFX_INTERRUPT( vPortSystemContextHandlerCore5, 5, configKERNEL_INTERRUPT_PRIORITY + 5 )
+{
+    unsigned long ** ppxTopOfStack;
+    unsigned long uxLowerCSA;
+    unsigned long * pxLowerCSA, * pxUpperCSA;
+
+    __disable();
+    {
+        __dsync();
+        /* Load the current top of stack pointer and csa info */
+        ppxTopOfStack = ( unsigned long ** ) pxCurrentTCBs[5];
+        uxLowerCSA = __mfcr( CPU_PCXI );
+        pxLowerCSA = portCSA_TO_ADDRESS( uxLowerCSA );
+        pxUpperCSA = portCSA_TO_ADDRESS( pxLowerCSA[ 0 ] );
+        /* Update the stack info in the TCB */
+        *ppxTopOfStack = ( unsigned long * ) pxUpperCSA[ 2 ];
+        /* Place the lower CSA id on the stack */
+        ( *ppxTopOfStack )--;
+        **ppxTopOfStack = uxLowerCSA;
+
+        vTaskSwitchContext(5);
+
+        /* Load the new CSA id from the new stack and update the stack pointer */
+        ppxTopOfStack = ( unsigned long ** ) pxCurrentTCBs[5];
+        uxLowerCSA = **ppxTopOfStack;
+        ( *ppxTopOfStack )++;
+        /* Update the link register */
+        __mtcr( CPU_PCXI, uxLowerCSA );
+        __isync();
+    }
+    __enable();
+}
+
+IFX_INTERRUPT( vPortSystemTickHandlerCore0, 0, configSYSTEM_INTERRUPT_PRIORITY )
 {
     unsigned long ulSavedInterruptMask;
     long lYieldRequired;
+    unsigned long index;
+
 
     IfxStm_Timer_acknowledgeTimerIrq(&g_timer[0]);
 
@@ -292,70 +449,85 @@ IFX_INTERRUPT( vPortSystemTickHandler, 0, configSYSTEM_INTERRUPT_PRIORITY )
     }
     portCLEAR_INTERRUPT_MASK_FROM_ISR( ulSavedInterruptMask );
 
-    unsigned long ** ppxTopOfStack;
-    unsigned long uxLowerCSA;
-    unsigned long * pxLowerCSA, * pxUpperCSA;
+    Ifx_STM* lStmModule = g_system_timer[0];
+    Ifx_SRC_SRCR* lContexSrc = g_GPSR[0];
 
-    __disable();
+    configASSERT((IfxStm_getCompare(lStmModule, IfxStm_Comparator_0) - IfxStm_getLower(lStmModule)) <= portTICK_COUNT);
+
+    if ( IfxSrc_isRequested( lContexSrc) != TRUE )
     {
-        __dsync();
-        /* Load the current top of stack pointer and csa info */
-        ppxTopOfStack = ( unsigned long ** ) pxCurrentTCBs[0];
-        uxLowerCSA = __mfcr( CPU_PCXI );
-        pxLowerCSA = portCSA_TO_ADDRESS( uxLowerCSA );
-        pxUpperCSA = portCSA_TO_ADDRESS( pxLowerCSA[ 0 ] );
-        /* Update the stack info in the TCB */
-        *ppxTopOfStack = ( unsigned long * ) pxUpperCSA[ 2 ];
-        /* Place the lower CSA id on the stack */
-        ( *ppxTopOfStack )--;
-        **ppxTopOfStack = uxLowerCSA;
-
-        vTaskSwitchContext(0);
-
-        /* Load the new CSA id from the new stack and update the stack pointer */
-        ppxTopOfStack = ( unsigned long ** ) pxCurrentTCBs[0];
-        uxLowerCSA = **ppxTopOfStack;
-        ( *ppxTopOfStack )++;
-        /* Update the link register */
-        __mtcr( CPU_PCXI, uxLowerCSA );
-        __isync();
+        IfxSrc_setRequest( lContexSrc );
     }
-    __enable();
 }
 
 IFX_INTERRUPT( vPortSystemTickHandlerCore1, 1, configSYSTEM_INTERRUPT_PRIORITY + 1)
 {
     IfxStm_Timer_acknowledgeTimerIrq(&g_timer[1]);
 
-    unsigned long ** ppxTopOfStack;
-    unsigned long uxLowerCSA;
-    unsigned long * pxLowerCSA, * pxUpperCSA;
+    Ifx_STM* lStmModule = g_system_timer[1];
+    Ifx_SRC_SRCR* lContexSrc = g_GPSR[1];
 
-    __disable();
+    configASSERT((IfxStm_getCompare(lStmModule, IfxStm_Comparator_0) - IfxStm_getLower(lStmModule)) <= portTICK_COUNT);
+    if ( IfxSrc_isRequested( lContexSrc) != TRUE )
     {
-        __dsync();
-        /* Load the current top of stack pointer and csa info */
-        ppxTopOfStack = ( unsigned long ** ) pxCurrentTCBs[1];
-        uxLowerCSA = __mfcr( CPU_PCXI );
-        pxLowerCSA = portCSA_TO_ADDRESS( uxLowerCSA );
-        pxUpperCSA = portCSA_TO_ADDRESS( pxLowerCSA[ 0 ] );
-        /* Update the stack info in the TCB */
-        *ppxTopOfStack = ( unsigned long * ) pxUpperCSA[ 2 ];
-        /* Place the lower CSA id on the stack */
-        ( *ppxTopOfStack )--;
-        **ppxTopOfStack = uxLowerCSA;
-
-        vTaskSwitchContext(1);
-
-        /* Load the new CSA id from the new stack and update the stack pointer */
-        ppxTopOfStack = ( unsigned long ** ) pxCurrentTCBs[1];
-        uxLowerCSA = **ppxTopOfStack;
-        ( *ppxTopOfStack )++;
-        /* Update the link register */
-        __mtcr( CPU_PCXI, uxLowerCSA );
-        __isync();
+        IfxSrc_setRequest( lContexSrc );
     }
-    __enable();
+}
+
+IFX_INTERRUPT( vPortSystemTickHandlerCore2, 2, configSYSTEM_INTERRUPT_PRIORITY + 2)
+{
+    IfxStm_Timer_acknowledgeTimerIrq(&g_timer[2]);
+
+    Ifx_STM* lStmModule = g_system_timer[2];
+    Ifx_SRC_SRCR* lContexSrc = g_GPSR[2];
+
+    configASSERT((IfxStm_getCompare(lStmModule, IfxStm_Comparator_0) - IfxStm_getLower(lStmModule)) <= portTICK_COUNT);
+    if ( IfxSrc_isRequested( lContexSrc) != TRUE )
+    {
+        IfxSrc_setRequest( lContexSrc );
+    }
+}
+
+IFX_INTERRUPT( vPortSystemTickHandlerCore3, 3, configSYSTEM_INTERRUPT_PRIORITY + 3)
+{
+    IfxStm_Timer_acknowledgeTimerIrq(&g_timer[3]);
+
+    Ifx_STM* lStmModule = g_system_timer[3];
+    Ifx_SRC_SRCR* lContexSrc = g_GPSR[3];
+
+    configASSERT((IfxStm_getCompare(lStmModule, IfxStm_Comparator_0) - IfxStm_getLower(lStmModule)) <= portTICK_COUNT);
+    if ( IfxSrc_isRequested( lContexSrc) != TRUE )
+    {
+        IfxSrc_setRequest( lContexSrc );
+    }
+}
+
+IFX_INTERRUPT( vPortSystemTickHandlerCore4, 4, configSYSTEM_INTERRUPT_PRIORITY + 4)
+{
+    IfxStm_Timer_acknowledgeTimerIrq(&g_timer[4]);
+
+    Ifx_STM* lStmModule = g_system_timer[4];
+    Ifx_SRC_SRCR* lContexSrc = g_GPSR[4];
+
+    configASSERT((IfxStm_getCompare(lStmModule, IfxStm_Comparator_0) - IfxStm_getLower(lStmModule)) <= portTICK_COUNT);
+    if ( IfxSrc_isRequested( lContexSrc) != TRUE )
+    {
+        IfxSrc_setRequest( lContexSrc );
+    }
+}
+
+IFX_INTERRUPT( vPortSystemTickHandlerCore5, 5, configSYSTEM_INTERRUPT_PRIORITY + 5)
+{
+    IfxStm_Timer_acknowledgeTimerIrq(&g_timer[5]);
+
+    Ifx_STM* lStmModule = g_system_timer[5];
+    Ifx_SRC_SRCR* lContexSrc = g_GPSR[5];
+
+    configASSERT((IfxStm_getCompare(lStmModule, IfxStm_Comparator_0) - IfxStm_getLower(lStmModule)) <= portTICK_COUNT);
+    if ( IfxSrc_isRequested( lContexSrc) != TRUE )
+    {
+        IfxSrc_setRequest( lContexSrc );
+    }
 }
 
 /*-----------------------------------------------------------*/
